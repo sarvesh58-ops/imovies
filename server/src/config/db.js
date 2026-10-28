@@ -8,7 +8,7 @@ export const connectDB = async () => {
     // Attempt connecting to configured URI with a 3-second timeout
     console.log(`[DB] Attempting connection to MongoDB at: ${ENV.MONGODB_URI}...`);
     const conn = await mongoose.connect(ENV.MONGODB_URI, {
-      serverSelectionTimeoutMS: 3000
+      serverSelectionTimeoutMS: 10000
     });
     console.log(`[DB] Successfully connected to MongoDB: ${conn.connection.host}`);
     return conn;

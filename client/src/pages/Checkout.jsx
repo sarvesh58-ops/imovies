@@ -20,6 +20,14 @@ export const Checkout = () => {
   const [discountAmount, setDiscountAmount] = useState(0);
   const [appliedCoupon, setAppliedCoupon] = useState('');
 
+  // Dummy Razorpay Gateway Modal State
+  const [dummyModalOpen, setDummyModalOpen] = useState(false);
+  const [dummyOrderData, setDummyOrderData] = useState(null);
+  const [dummyPaymentTab, setDummyPaymentTab] = useState('upi'); // 'upi' | 'card' | 'netbanking'
+  const [dummyUpiApp, setDummyUpiApp] = useState('Google Pay');
+  const [dummyUpiId, setDummyUpiId] = useState(user?.email ? `${user.email.split('@')[0]}@okaxis` : 'moviegoer@oksbi');
+  const [dummyProcessing, setDummyProcessing] = useState(false);
+
   // Card fields for Card simulator
   const [cardNumber, setCardNumber] = useState('4242 •••• •••• 4242');
   const [cardExpiry, setCardExpiry] = useState('12/28');
@@ -87,24 +95,15 @@ export const Checkout = () => {
 
         const orderData = orderRes.data;
 
-        // If in evaluation mode (simulated order)
-        if (orderData.isSimulated || !window.Razorpay) {
-          // Verify with simulated credentials directly
-          const confirmRes = await bookingService.verifyRazorpayPayment({
-            showtimeId: activeShowtime._id,
-            seatIds: selectedSeats.map((s) => s._id),
-            razorpayOrderId: orderData.orderId,
-            razorpayPaymentId: `pay_sim_${Date.now()}`,
-            razorpaySignature: 'simulated_signature'
-          });
-
-          showToast('Payment verified! Booking confirmed successfully.', 'success');
-          clearBooking();
-          navigate(`/booking/success/${confirmRes.data._id}`);
+        // If keys are not configured or user is in simulation mode, open the interactive Dummy Razorpay Modal
+        if (orderData.isSimulated || !paymentConfig.isRazorpayConfigured || !window.Razorpay) {
+          setDummyOrderData(orderData);
+          setDummyModalOpen(true);
+          setSubmitting(false);
           return;
         }
 
-        // Live Razorpay popup
+        // Live Razorpay popup (when official test/live keys are present)
         const options = {
           key: orderData.keyId,
           amount: orderData.amount,
@@ -171,6 +170,37 @@ export const Checkout = () => {
     }
   };
 
+  // Complete payment via interactive Dummy Razorpay Gateway
+  const handleDummyRazorpaySuccess = async () => {
+    if (!dummyOrderData) return;
+    setDummyProcessing(true);
+
+    try {
+      const simulatedPaymentId = `pay_sim_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const confirmRes = await bookingService.verifyRazorpayPayment({
+        showtimeId: activeShowtime._id,
+        seatIds: selectedSeats.map((s) => s._id),
+        razorpayOrderId: dummyOrderData.orderId,
+        razorpayPaymentId: simulatedPaymentId,
+        razorpaySignature: 'simulated_valid_signature'
+      });
+
+      showToast('Razorpay Payment Successful! Booking Confirmed.', 'success');
+      setDummyModalOpen(false);
+      clearBooking();
+      navigate(`/booking/success/${confirmRes.data._id}`);
+    } catch (err) {
+      showToast(err.message || 'Dummy payment verification failed', 'error');
+    } finally {
+      setDummyProcessing(false);
+    }
+  };
+
+  const handleDummyRazorpayFailure = () => {
+    setDummyModalOpen(false);
+    showToast('Payment Cancelled / Declined in Razorpay Simulator.', 'warning');
+  };
+
   return (
     <div className="container py-5">
       <div className="row g-4 justify-content-center">
@@ -221,26 +251,26 @@ export const Checkout = () => {
             <form onSubmit={handleConfirmPayment}>
               {paymentMethod === 'Razorpay' ? (
                 <div className="p-4 rounded-3 bg-dark border border-secondary border-opacity-50 text-center mb-4">
-                  <div className="d-flex align-items-center justify-content-center gap-2 mb-2">
-                    <span className="badge bg-danger fs-6 px-3 py-1.5 fw-bold">
-                      <i className="bi bi-wallet2 me-1"></i> Razorpay Payment Gateway
+                  <div className="d-flex align-items-center justify-content-center gap-2 mb-2 flex-wrap">
+                    <span className="badge bg-primary bg-opacity-75 fs-6 px-3 py-1.5 fw-bold d-inline-flex align-items-center gap-1">
+                      <i className="bi bi-wallet2"></i> Razorpay Payment Gateway
                     </span>
                     {paymentConfig.isRazorpayConfigured ? (
                       <span className="badge bg-success bg-opacity-25 text-success border border-success">
                         Live Gateway Active
                       </span>
                     ) : (
-                      <span className="badge bg-info bg-opacity-25 text-info border border-info" title="Provide RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET in .env">
-                        Sandbox Simulator
+                      <span className="badge bg-info bg-opacity-25 text-info border border-info">
+                        Interactive Dummy Gateway Enabled
                       </span>
                     )}
                   </div>
                   <p className="text-secondary small mb-3">
-                    Pay securely using UPI (Google Pay, PhonePe, Paytm), Credit/Debit Cards, NetBanking, or Digital Wallets via Razorpay.
+                    Click below to open the <strong>Razorpay Online Payment Modal</strong>. Test with UPI (GPay, PhonePe, Paytm), Credit/Debit Card, or Netbanking.
                   </p>
                   <div className="text-secondary extra-small border-top border-secondary border-opacity-25 pt-2">
                     <i className="bi bi-shield-lock-fill text-success me-1"></i>
-                    End-to-end encrypted with HMAC SHA256 cryptographic signature validation.
+                    Simulates order creation, HMAC SHA256 cryptographic verification & ticket issuance.
                   </div>
                 </div>
               ) : paymentMethod.includes('Card') ? (
@@ -346,13 +376,13 @@ export const Checkout = () => {
                 {submitting ? (
                   <>
                     <span className="spinner-border spinner-border-sm" role="status"></span>
-                    <span>Securing Seats & Confirming Ticket...</span>
+                    <span>Connecting to Razorpay Gateway...</span>
                   </>
                 ) : (
                   <>
                     <i className="bi bi-lock-fill"></i>
                     <span>
-                      {paymentMethod === 'Razorpay' ? 'Proceed with Razorpay' : 'Confirm & Pay'}{' '}
+                      {paymentMethod === 'Razorpay' ? 'Open Razorpay Gateway' : 'Confirm & Pay'}{' '}
                       ${finalTotal.toFixed(2)}
                     </span>
                   </>
@@ -425,6 +455,207 @@ export const Checkout = () => {
           </div>
         </div>
       </div>
+
+      {/* ========================================================
+          AUTHENTIC DUMMY RAZORPAY PAYMENT GATEWAY MODAL
+      ======================================================== */}
+      {dummyModalOpen && (
+        <div
+          className="modal fade show d-block"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(10px)', zIndex: 1060 }}
+          onClick={() => !dummyProcessing && setDummyModalOpen(false)}
+        >
+          <div
+            className="modal-dialog modal-dialog-centered"
+            style={{ maxWidth: '440px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-content border-0 shadow-2xl rounded-4 overflow-hidden" style={{ background: '#0c2340', color: '#fff' }}>
+              {/* Razorpay Header */}
+              <div className="p-4" style={{ background: 'linear-gradient(135deg, #0c2340 0%, #173d6b 100%)', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                <div className="d-flex align-items-center justify-content-between mb-2">
+                  <div className="d-flex align-items-center gap-2">
+                    <div
+                      className="d-flex align-items-center justify-content-center rounded-2 bg-primary text-white fw-bolder"
+                      style={{ width: '32px', height: '32px', fontSize: '1rem' }}
+                    >
+                      R
+                    </div>
+                    <div>
+                      <h6 className="mb-0 fw-bold text-white tracking-wide">Razorpay Checkout</h6>
+                      <span className="badge bg-warning text-dark extra-small fw-bold" style={{ fontSize: '0.65rem' }}>
+                        TEST MODE / SIMULATOR
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-close btn-close-white"
+                    disabled={dummyProcessing}
+                    onClick={() => setDummyModalOpen(false)}
+                  ></button>
+                </div>
+
+                <div className="mt-3 p-2.5 rounded-3 bg-black bg-opacity-25 d-flex align-items-center justify-content-between">
+                  <div>
+                    <span className="text-secondary extra-small d-block">Amount Payable</span>
+                    <span className="fs-4 fw-bolder text-white">₹{Math.round(finalTotal * 83)}</span>
+                    <span className="text-secondary extra-small ms-1">(${finalTotal.toFixed(2)})</span>
+                  </div>
+                  <div className="text-end">
+                    <span className="text-secondary extra-small d-block">Order Ref</span>
+                    <span className="font-monospace extra-small text-info">{dummyOrderData?.orderId?.substring(0, 16)}...</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Methods Navigation */}
+              <div className="d-flex border-bottom border-secondary border-opacity-25 bg-black bg-opacity-25">
+                {[
+                  { id: 'upi', label: 'UPI / QR', icon: 'bi-qr-code-scan' },
+                  { id: 'card', label: 'Cards', icon: 'bi-credit-card' },
+                  { id: 'netbanking', label: 'Netbanking', icon: 'bi-bank' }
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`btn btn-sm flex-grow-1 py-2.5 rounded-0 border-0 fw-semibold extra-small d-flex align-items-center justify-content-center gap-1 ${
+                      dummyPaymentTab === tab.id
+                        ? 'bg-primary text-white'
+                        : 'text-secondary'
+                    }`}
+                    onClick={() => setDummyPaymentTab(tab.id)}
+                  >
+                    <i className={`bi ${tab.icon}`}></i>
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Modal Body: Active Tab Content */}
+              <div className="p-4" style={{ minHeight: '220px' }}>
+                {dummyProcessing ? (
+                  <div className="text-center py-5">
+                    <div className="spinner-border text-primary mb-3" style={{ width: '3rem', height: '3rem' }}></div>
+                    <h6 className="fw-bold text-white mb-1">Authorizing Razorpay Test Payment...</h6>
+                    <p className="text-secondary small mb-0">Communicating with banking simulator & verifying cryptographic signature</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* UPI Tab */}
+                    {dummyPaymentTab === 'upi' && (
+                      <div>
+                        <span className="text-secondary extra-small text-uppercase fw-semibold mb-2 d-block">
+                          Choose UPI App
+                        </span>
+                        <div className="row g-2 mb-3">
+                          {['Google Pay', 'PhonePe', 'Paytm', 'BHIM UPI'].map((app) => (
+                            <div key={app} className="col-6">
+                              <button
+                                type="button"
+                                className={`btn btn-sm w-100 py-2 rounded-2 text-start d-flex align-items-center gap-2 ${
+                                  dummyUpiApp === app
+                                    ? 'btn-outline-primary bg-primary bg-opacity-25 text-white fw-bold'
+                                    : 'btn-dark border-secondary text-secondary'
+                                }`}
+                                onClick={() => setDummyUpiApp(app)}
+                              >
+                                <i className="bi bi-check-circle-fill text-primary" style={{ visibility: dummyUpiApp === app ? 'visible' : 'hidden' }}></i>
+                                <span className="small">{app}</span>
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="mb-3">
+                          <label className="text-secondary extra-small fw-semibold mb-1 d-block">UPI ID / VPA</label>
+                          <input
+                            type="text"
+                            className="form-control form-control-sm bg-black border-secondary text-white font-monospace"
+                            value={dummyUpiId}
+                            onChange={(e) => setDummyUpiId(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Card Tab */}
+                    {dummyPaymentTab === 'card' && (
+                      <div>
+                        <div className="p-3 rounded-3 bg-black bg-opacity-40 border border-secondary border-opacity-50 mb-3">
+                          <span className="badge bg-success bg-opacity-25 text-success extra-small mb-2">
+                            Pre-filled Razorpay Test Card
+                          </span>
+                          <div className="mb-2">
+                            <label className="text-secondary extra-small d-block">Card Number</label>
+                            <span className="font-monospace text-white fw-bold">4242 •••• •••• 4242</span>
+                          </div>
+                          <div className="d-flex justify-content-between text-secondary extra-small">
+                            <span>EXP: 12/28</span>
+                            <span>CVV: 888</span>
+                            <span>VISA</span>
+                          </div>
+                        </div>
+                        <p className="text-secondary extra-small mb-0">
+                          <i className="bi bi-info-circle me-1 text-info"></i>
+                          Using Razorpay standard test credentials. No real funds are deducted.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Netbanking Tab */}
+                    {dummyPaymentTab === 'netbanking' && (
+                      <div>
+                        <span className="text-secondary extra-small text-uppercase fw-semibold mb-2 d-block">
+                          Popular Banks
+                        </span>
+                        <div className="row g-2 mb-3">
+                          {['HDFC Bank', 'State Bank of India', 'ICICI Bank', 'Axis Bank'].map((bank) => (
+                            <div key={bank} className="col-6">
+                              <div className="p-2.5 rounded-2 bg-dark border border-secondary text-center small text-white">
+                                <i className="bi bi-bank2 d-block text-primary fs-5 mb-1"></i>
+                                <span className="extra-small fw-semibold">{bank}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              {!dummyProcessing && (
+                <div className="p-4 pt-0">
+                  <button
+                    type="button"
+                    className="btn btn-primary w-100 py-2.5 fw-bold d-flex align-items-center justify-content-center gap-2 mb-2 shadow"
+                    onClick={handleDummyRazorpaySuccess}
+                  >
+                    <i className="bi bi-check2-circle fs-5"></i>
+                    <span>Simulate Successful Payment (₹{Math.round(finalTotal * 83)})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-link text-danger w-100 py-1 extra-small text-decoration-none"
+                    onClick={handleDummyRazorpayFailure}
+                  >
+                    Simulate Payment Failure / Cancel
+                  </button>
+                </div>
+              )}
+
+              {/* Razorpay Footer */}
+              <div className="py-2.5 px-4 bg-black bg-opacity-50 border-top border-secondary border-opacity-25 d-flex align-items-center justify-content-between text-secondary extra-small">
+                <span>Secured by Razorpay</span>
+                <span>PCI-DSS Level 1 Compliant</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
